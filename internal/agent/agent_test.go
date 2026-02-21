@@ -1,0 +1,429 @@
+package agent
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"log/slog"
+	"os"
+	"testing"
+	"time"
+
+	"github.com/lancekrogers/agent-defi-ethden-2026/internal/base/trading"
+	"github.com/lancekrogers/agent-defi-ethden-2026/internal/hcs"
+)
+
+// Mock implementations for testing
+
+type mockStrategy struct {
+	name        string
+	signal      *trading.Signal
+	evaluateErr error
+	maxPos      float64
+}
+
+func (m *mockStrategy) Name() string { return m.name }
+
+func (m *mockStrategy) Evaluate(_ context.Context, _ trading.MarketState) (*trading.Signal, error) {
+	return m.signal, m.evaluateErr
+}
+
+func (m *mockStrategy) MaxPosition() float64 { return m.maxPos }
+
+type mockExecutor struct {
+	executeErr       error
+	balanceErr       error
+	marketErr        error
+	executeResult    *trading.TradeResult
+	balance          *trading.Balance
+	market           *trading.MarketState
+}
+
+func (m *mockExecutor) Execute(_ context.Context, trade trading.Trade) (*trading.TradeResult, error) {
+	if m.executeErr != nil {
+		return nil, m.executeErr
+	}
+	if m.executeResult != nil {
+		return m.executeResult, nil
+	}
+	return &trading.TradeResult{
+		Trade:      trade,
+		TxHash:     "0xmocktx",
+		ExecutedAt: time.Now(),
+		Profitable: true,
+	}, nil
+}
+
+func (m *mockExecutor) GetBalance(_ context.Context, _ string) (*trading.Balance, error) {
+	return m.balance, m.balanceErr
+}
+
+func (m *mockExecutor) GetMarketState(_ context.Context, _, _ string) (*trading.MarketState, error) {
+	if m.marketErr != nil {
+		return nil, m.marketErr
+	}
+	if m.market != nil {
+		return m.market, nil
+	}
+	return &trading.MarketState{
+		TokenIn:       "0xusdc",
+		TokenOut:      "0xweth",
+		Price:         1800.0,
+		MovingAverage: 1750.0,
+		Liquidity:     10_000_000,
+		FetchedAt:     time.Now(),
+	}, nil
+}
+
+type mockTransport struct {
+	published [][]byte
+	messages  chan []byte
+	subErr    chan error
+}
+
+func newMockTransport() *mockTransport {
+	return &mockTransport{
+		published: make([][]byte, 0),
+		messages:  make(chan []byte, 16),
+		subErr:    make(chan error, 1),
+	}
+}
+
+func (m *mockTransport) Publish(_ context.Context, _ string, data []byte) error {
+	m.published = append(m.published, data)
+	return nil
+}
+
+func (m *mockTransport) Subscribe(_ context.Context, _ string) (<-chan []byte, <-chan error) {
+	return m.messages, m.subErr
+}
+
+func testLogger() *slog.Logger {
+	return slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+}
+
+func testConfig() Config {
+	return Config{
+		AgentID:         "test-defi-agent",
+		HealthInterval:  time.Hour,   // prevent health messages during tests
+		TradingInterval: time.Hour,   // prevent trading during tests
+		Trading: TradingConfig{
+			TokenIn:         "0xusdc",
+			TokenOut:        "0xweth",
+			MaxPositionSize: 1.0,
+		},
+	}
+}
+
+func testAgent(t *testing.T) (*Agent, *mockTransport) {
+	t.Helper()
+	mt := newMockTransport()
+	handler := hcs.NewHandler(hcs.HandlerConfig{
+		Transport:     mt,
+		TaskTopicID:   "task-topic",
+		ResultTopicID: "result-topic",
+		AgentID:       "test-defi-agent",
+	})
+
+	strategy := &mockStrategy{
+		name:   "mean_reversion",
+		maxPos: 1.0,
+		signal: &trading.Signal{
+			Type:          trading.SignalBuy,
+			Confidence:    0.8,
+			SuggestedSize: 0.001,
+			TokenIn:       "0xusdc",
+			TokenOut:      "0xweth",
+			GeneratedAt:   time.Now(),
+		},
+	}
+
+	a := New(
+		testConfig(),
+		testLogger(),
+		strategy,
+		&mockExecutor{},
+		trading.NewPnLTracker(),
+		handler,
+	)
+	return a, mt
+}
+
+func TestProcessTrade_Success(t *testing.T) {
+	a, mt := testAgent(t)
+
+	signal := &trading.Signal{
+		Type:          trading.SignalBuy,
+		Confidence:    0.8,
+		SuggestedSize: 0.001,
+		TokenIn:       "0xusdc",
+		TokenOut:      "0xweth",
+		GeneratedAt:   time.Now(),
+	}
+	market := &trading.MarketState{
+		Price:         1800.0,
+		MovingAverage: 1750.0,
+		FetchedAt:     time.Now(),
+	}
+
+	err := a.processTrade(context.Background(), signal, market)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if a.completedTrades != 1 {
+		t.Errorf("expected 1 completed trade, got %d", a.completedTrades)
+	}
+
+	// Should have published a P&L report.
+	if len(mt.published) < 1 {
+		t.Error("expected at least 1 published message (P&L report)")
+	}
+}
+
+func TestProcessTrade_ExecuteFails(t *testing.T) {
+	mt := newMockTransport()
+	handler := hcs.NewHandler(hcs.HandlerConfig{
+		Transport:     mt,
+		ResultTopicID: "result-topic",
+		AgentID:       "test-agent",
+	})
+
+	a := New(
+		testConfig(), testLogger(),
+		&mockStrategy{name: "s", maxPos: 1.0},
+		&mockExecutor{executeErr: errors.New("trade failed")},
+		trading.NewPnLTracker(),
+		handler,
+	)
+
+	signal := &trading.Signal{
+		Type:          trading.SignalBuy,
+		SuggestedSize: 0.001,
+		TokenIn:       "0xusdc",
+		TokenOut:      "0xweth",
+	}
+	market := &trading.MarketState{Price: 1800.0, FetchedAt: time.Now()}
+
+	err := a.processTrade(context.Background(), signal, market)
+	if err == nil {
+		t.Fatal("expected error when execute fails")
+	}
+}
+
+func TestTradingLoop_ExecutesStrategy(t *testing.T) {
+	mt := newMockTransport()
+	handler := hcs.NewHandler(hcs.HandlerConfig{
+		Transport:     mt,
+		ResultTopicID: "result-topic",
+		AgentID:       "test-agent",
+	})
+
+	strategy := &mockStrategy{
+		name:   "mean_reversion",
+		maxPos: 1.0,
+		signal: &trading.Signal{
+			Type:          trading.SignalBuy,
+			Confidence:    0.8,
+			SuggestedSize: 0.001,
+			TokenIn:       "0xusdc",
+			TokenOut:      "0xweth",
+			GeneratedAt:   time.Now(),
+		},
+	}
+
+	cfg := testConfig()
+	cfg.TradingInterval = 50 * time.Millisecond
+
+	a := New(
+		cfg, testLogger(),
+		strategy,
+		&mockExecutor{},
+		trading.NewPnLTracker(),
+		handler,
+	)
+
+	ctx, cancel := context.WithCancel(context.Background())
+
+	go a.tradingLoop(ctx)
+	time.Sleep(120 * time.Millisecond)
+	cancel()
+
+	// Should have completed at least 1 trade.
+	if a.completedTrades < 1 {
+		t.Errorf("expected at least 1 completed trade, got %d", a.completedTrades)
+	}
+}
+
+func TestTradingLoop_HoldSignalSkipsTrade(t *testing.T) {
+	a, _ := testAgent(t)
+
+	// Override strategy to return hold signal.
+	a.strategy = &mockStrategy{
+		name:   "mean_reversion",
+		maxPos: 1.0,
+		signal: &trading.Signal{
+			Type:        trading.SignalHold,
+			Confidence:  0.9,
+			GeneratedAt: time.Now(),
+		},
+	}
+
+	err := a.executeTradingCycle(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if a.completedTrades != 0 {
+		t.Errorf("expected 0 trades for hold signal, got %d", a.completedTrades)
+	}
+}
+
+func TestRun_GracefulShutdown(t *testing.T) {
+	a, _ := testAgent(t)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+
+	go func() {
+		done <- a.Run(ctx)
+	}()
+
+	time.Sleep(50 * time.Millisecond)
+	cancel()
+
+	select {
+	case err := <-done:
+		if err != context.Canceled {
+			t.Errorf("expected context.Canceled, got %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timeout waiting for graceful shutdown")
+	}
+}
+
+func TestRun_ReceivesAndProcessesTask(t *testing.T) {
+	mt := newMockTransport()
+	handler := hcs.NewHandler(hcs.HandlerConfig{
+		Transport:     mt,
+		TaskTopicID:   "task-topic",
+		ResultTopicID: "result-topic",
+		AgentID:       "test-agent",
+	})
+
+	a := New(
+		testConfig(), testLogger(),
+		&mockStrategy{
+			name:   "mean_reversion",
+			maxPos: 1.0,
+			signal: &trading.Signal{
+				Type:        trading.SignalHold,
+				Confidence:  0.9,
+				GeneratedAt: time.Now(),
+			},
+		},
+		&mockExecutor{},
+		trading.NewPnLTracker(),
+		handler,
+	)
+
+	ctx, cancel := context.WithCancel(context.Background())
+
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		// Send a task assignment.
+		payload, _ := json.Marshal(hcs.TaskAssignment{
+			TaskID:   "task-run-1",
+			TaskType: "execute_trade",
+		})
+		env := hcs.Envelope{
+			Type:    hcs.MessageTypeTaskAssignment,
+			Sender:  "coordinator",
+			Payload: payload,
+		}
+		data, _ := env.Marshal()
+		mt.messages <- data
+		time.Sleep(100 * time.Millisecond)
+		cancel()
+	}()
+
+	err := a.Run(ctx)
+	if err != nil && err != context.Canceled {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestLoadConfig_RequiredFields(t *testing.T) {
+	os.Unsetenv("DEFI_AGENT_ID")
+	_, err := LoadConfig()
+	if err == nil {
+		t.Fatal("expected error when DEFI_AGENT_ID is missing")
+	}
+}
+
+func TestLoadConfig_Defaults(t *testing.T) {
+	t.Setenv("DEFI_AGENT_ID", "test-defi-123")
+
+	cfg, err := LoadConfig()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if cfg.AgentID != "test-defi-123" {
+		t.Errorf("expected test-defi-123, got %s", cfg.AgentID)
+	}
+	if cfg.DaemonAddr != "localhost:9090" {
+		t.Errorf("expected localhost:9090, got %s", cfg.DaemonAddr)
+	}
+	if cfg.HealthInterval != 30*time.Second {
+		t.Errorf("expected 30s, got %v", cfg.HealthInterval)
+	}
+	if cfg.TradingInterval != 60*time.Second {
+		t.Errorf("expected 60s, got %v", cfg.TradingInterval)
+	}
+	if cfg.Base.RPCURL != "https://sepolia.base.org" {
+		t.Errorf("expected https://sepolia.base.org, got %s", cfg.Base.RPCURL)
+	}
+	if cfg.Base.ChainID != 84532 {
+		t.Errorf("expected 84532, got %d", cfg.Base.ChainID)
+	}
+}
+
+func TestLoadConfig_CustomValues(t *testing.T) {
+	t.Setenv("DEFI_AGENT_ID", "custom-agent")
+	t.Setenv("DEFI_DAEMON_ADDR", "custom:8080")
+	t.Setenv("DEFI_HEALTH_INTERVAL", "1m")
+	t.Setenv("DEFI_TRADING_INTERVAL", "30s")
+	t.Setenv("DEFI_BASE_RPC_URL", "https://custom.rpc")
+	t.Setenv("HCS_TASK_TOPIC", "task-topic-1")
+	t.Setenv("HCS_RESULT_TOPIC", "result-topic-1")
+
+	cfg, err := LoadConfig()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if cfg.DaemonAddr != "custom:8080" {
+		t.Errorf("expected custom:8080, got %s", cfg.DaemonAddr)
+	}
+	if cfg.HealthInterval != time.Minute {
+		t.Errorf("expected 1m, got %v", cfg.HealthInterval)
+	}
+	if cfg.TradingInterval != 30*time.Second {
+		t.Errorf("expected 30s, got %v", cfg.TradingInterval)
+	}
+	if cfg.Base.RPCURL != "https://custom.rpc" {
+		t.Errorf("expected https://custom.rpc, got %s", cfg.Base.RPCURL)
+	}
+	if cfg.HCS.TaskTopicID != "task-topic-1" {
+		t.Errorf("expected task-topic-1, got %s", cfg.HCS.TaskTopicID)
+	}
+}
+
+func TestLoadConfig_InvalidInterval(t *testing.T) {
+	t.Setenv("DEFI_AGENT_ID", "test-agent")
+	t.Setenv("DEFI_HEALTH_INTERVAL", "not-a-duration")
+
+	_, err := LoadConfig()
+	if err == nil {
+		t.Fatal("expected error for invalid duration")
+	}
+}
