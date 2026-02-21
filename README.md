@@ -87,4 +87,4 @@ The trading pipeline per cycle: fetch market state from DEX, evaluate mean rever
 
 ## License
 
-Apache-2.0
+MIT
