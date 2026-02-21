@@ -28,6 +28,8 @@ github.com/hiero-ledger/hiero-sdk-go/v2 v2.75.0 h1:XOHelGMKrQULu532J3OiJZtUcCIn/
 github.com/hiero-ledger/hiero-sdk-go/v2 v2.75.0/go.mod h1:1vJRHg4hueJ8y92egW/j0mqeYLbjMaDlo4/2k/Y7jzc=
 github.com/json-iterator/go v1.1.12 h1:PV8peI4a0ysnczrg+LtxykD8LfKY9ML6u2jnxaEnrnM=
 github.com/json-iterator/go v1.1.12/go.mod h1:e30LSqwooZae/UwlEbR2852Gd8hjQvJoHmT4TnhNGBo=
+github.com/lancekrogers/agent-coordinator-ethden-2026 v0.0.0-20260221224746-0059b418ef82 h1:+/J0LTQbwhcyT4AuefDmKRnE0cusdhwbf6LEcx7Y5AA=
+github.com/lancekrogers/agent-coordinator-ethden-2026 v0.0.0-20260221224746-0059b418ef82/go.mod h1:qqqGTogt3INJ/45PINplgkeuwJhhxiIA2A0tyvKQ7Cs=
 github.com/mattn/go-colorable v0.1.13/go.mod h1:7S9/ev0klgBDR4GtXTXX8a3vIGJpMovkB8vQcUbaXHg=
 github.com/mattn/go-colorable v0.1.14 h1:9A9LHSqF/7dyVVX6g0U9cwm9pG3kP9gSzcuIPHPsaIE=
 github.com/mattn/go-colorable v0.1.14/go.mod h1:6LmQG8QLFO4G5z1gPvYEzlUgJ2wF+stgPZH1UqBm1s8=

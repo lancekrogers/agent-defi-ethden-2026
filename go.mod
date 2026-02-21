@@ -4,10 +4,8 @@ go 1.24.0
 
 require (
 	github.com/hiero-ledger/hiero-sdk-go/v2 v2.75.0
-	github.com/lancekrogers/agent-coordinator-ethden-2026 v0.0.0
+	github.com/lancekrogers/agent-coordinator-ethden-2026 v0.0.0-20260221224746-0059b418ef82
 )
-
-replace github.com/lancekrogers/agent-coordinator-ethden-2026 => ../agent-coordinator
 
 require (
 	github.com/btcsuite/btcd/btcec/v2 v2.3.6 // indirect
