@@ -254,7 +254,7 @@ func (r *registry) Verify(ctx context.Context, agentID string) (bool, error) {
 }
 
 // GetIdentity retrieves the on-chain identity record for an agent via eth_call.
-// In production this would ABI-decode the result from the registry contract.
+// The result bytes are ABI-decoded as (uint8 status, bytes metadata, bytes signature).
 func (r *registry) GetIdentity(ctx context.Context, agentID string) (*Identity, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, fmt.Errorf("identity: context cancelled before get identity: %w", err)
@@ -297,16 +297,83 @@ func (r *registry) GetIdentity(ctx context.Context, agentID string) (*Identity, 
 		return nil, fmt.Errorf("identity: agent %s: %w", agentID, ErrIdentityNotFound)
 	}
 
-	// In production, ABI-decode the result bytes into an Identity struct.
-	// Return a stub identity for the RPC integration layer.
+	return r.decodeIdentity(agentID, result)
+}
+
+// decodeIdentity ABI-decodes a hex-encoded eth_call result into an Identity.
+// Expected ABI output: (uint8 status, bytes metadata, bytes signature).
+// Status 0 is treated as not-registered; 1 = active; 2 = revoked.
+func (r *registry) decodeIdentity(agentID, hexResult string) (*Identity, error) {
+	if len(hexResult) < 4 || hexResult[:2] != "0x" {
+		return nil, fmt.Errorf("identity: invalid hex result for agent %s", agentID)
+	}
+
+	data, err := hex.DecodeString(hexResult[2:])
+	if err != nil {
+		return nil, fmt.Errorf("identity: hex decode failed for agent %s: %w", agentID, err)
+	}
+
+	parsed, err := abi.JSON(bytes.NewReader([]byte(`[{
+		"name": "getIdentity",
+		"type": "function",
+		"inputs": [{"name": "agentId", "type": "bytes32"}],
+		"outputs": [
+			{"name": "status", "type": "uint8"},
+			{"name": "metadata", "type": "bytes"},
+			{"name": "signature", "type": "bytes"}
+		]
+	}]`)))
+	if err != nil {
+		return nil, fmt.Errorf("identity: parse getIdentity ABI: %w", err)
+	}
+
+	outputs, err := parsed.Methods["getIdentity"].Outputs.Unpack(data)
+	if err != nil {
+		return nil, fmt.Errorf("identity: ABI decode failed for agent %s: %w", agentID, err)
+	}
+
+	if len(outputs) < 3 {
+		return nil, fmt.Errorf("identity: unexpected output count %d for agent %s", len(outputs), agentID)
+	}
+
+	status, _ := outputs[0].(uint8)
+	metadataBytes, _ := outputs[1].([]byte)
+	signatureBytes, _ := outputs[2].([]byte)
+
+	// Status 0 means the agent is not registered on-chain.
+	if status == 0 {
+		return nil, fmt.Errorf("identity: agent %s: %w", agentID, ErrIdentityNotFound)
+	}
+
 	identity := &Identity{
 		AgentID:         agentID,
 		ContractAddress: r.cfg.ContractAddress,
-		Status:          StatusActive,
-		IsVerified:      true,
+		Status:          statusFromUint8(status),
+		IsVerified:      status == 1,
+		PublicKey:        signatureBytes,
 		ChainID:         r.cfg.ChainID,
 	}
 
+	// Metadata is stored as JSON-encoded bytes on-chain.
+	if len(metadataBytes) > 0 {
+		var meta map[string]string
+		if jsonErr := json.Unmarshal(metadataBytes, &meta); jsonErr == nil {
+			identity.Metadata = meta
+		}
+	}
+
 	return identity, nil
+}
+
+// statusFromUint8 maps an on-chain uint8 status to IdentityStatus.
+func statusFromUint8(s uint8) IdentityStatus {
+	switch s {
+	case 1:
+		return StatusActive
+	case 2:
+		return StatusRevoked
+	default:
+		return StatusPending
+	}
 }
 

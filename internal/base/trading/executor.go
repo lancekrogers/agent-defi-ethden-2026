@@ -68,6 +68,7 @@ type ExecutorConfig struct {
 type executor struct {
 	cfg    ExecutorConfig
 	client *http.Client
+	ma     *SMA
 }
 
 // NewExecutor creates a TradeExecutor for the Base Sepolia DEX.
@@ -87,6 +88,7 @@ func NewExecutor(cfg ExecutorConfig) TradeExecutor {
 	return &executor{
 		cfg:    cfg,
 		client: &http.Client{Timeout: cfg.HTTPTimeout},
+		ma:     NewSMA(20),
 	}
 }
 
@@ -164,6 +166,14 @@ func (e *executor) Execute(ctx context.Context, trade Trade) (*TradeResult, erro
 		return nil, fmt.Errorf("executor: swap tx failed: %w", ErrTradeFailed)
 	}
 
+	// Compute actual gas cost: GasUsed * EffectiveGasPrice.
+	gasUsed := new(big.Int).SetUint64(receipt.GasUsed)
+	effectivePrice := receipt.EffectiveGasPrice
+	if effectivePrice == nil {
+		effectivePrice = big.NewInt(0)
+	}
+	gasCostWei := new(big.Int).Mul(gasUsed, effectivePrice)
+
 	result := &TradeResult{
 		Trade:      trade,
 		TxHash:     txHash.Hex(),
@@ -171,7 +181,8 @@ func (e *executor) Execute(ctx context.Context, trade Trade) (*TradeResult, erro
 		AmountOut:  trade.MinAmountOut,
 		ExecutedAt: time.Now(),
 		Profitable: trade.Signal.Type == SignalBuy,
-		GasCostWei: fmt.Sprintf("0x%x", receipt.GasUsed),
+		GasUsed:    receipt.GasUsed,
+		GasCostWei: fmt.Sprintf("0x%x", gasCostWei),
 	}
 
 	return result, nil
@@ -341,12 +352,20 @@ func (e *executor) GetMarketState(ctx context.Context, tokenIn, tokenOut string)
 	liquidity := new(big.Int).SetBytes(liqBytes)
 	liqFloat, _ := new(big.Float).SetInt(liquidity).Float64()
 
+	// Feed the live price into the sliding-window SMA.
+	e.ma.Add(price)
+
+	ma := price // neutral default until enough data accumulates
+	if e.ma.Ready() {
+		ma = e.ma.Value()
+	}
+
 	state := &MarketState{
 		TokenIn:       tokenIn,
 		TokenOut:      tokenOut,
 		Price:         price,
-		MovingAverage: price * 0.98, // approximate TWAP from current price
-		Volume24h:     0,            // requires subgraph; not available via eth_call
+		MovingAverage: ma,
+		Volume24h:     0, // requires subgraph; not available via eth_call
 		Liquidity:     liqFloat,
 		FetchedAt:     time.Now(),
 	}
