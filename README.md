@@ -205,6 +205,7 @@ internal/
     identity/              ERC-8004 on-chain identity registration
     payment/               x402 machine-to-machine payment protocol
     trading/               Mean reversion strategy, trade executor, P&L tracker
+  guard/                   CRE Risk Router constraint enforcement (position clamping)
   hcs/                     HCS publish/subscribe transport (Hiero SDK)
 ```
 
@@ -218,6 +219,16 @@ just lint       # golangci-lint
 just fmt        # gofmt
 just clean      # Remove build artifacts
 ```
+
+## CRE Risk Router Integration
+
+The agent enforces position constraints from the [CRE Risk Router](../cre-risk-router/) via `internal/guard/CREGuard`:
+
+- If the coordinator provides a CRE-approved `MaxPositionUSD`, the guard clamps the requested trade size to that limit
+- If no CRE constraint is present, the agent falls back to its local strategy limits
+- All constraint decisions are logged for audit
+
+This ensures the DeFi agent can never exceed the position size approved by the Chainlink DON consensus risk evaluation.
 
 ## Base Bounty Alignment
 
