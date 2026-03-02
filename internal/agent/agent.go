@@ -31,6 +31,7 @@ import (
 	"github.com/lancekrogers/agent-defi-ethden-2026/internal/base/identity"
 	"github.com/lancekrogers/agent-defi-ethden-2026/internal/base/payment"
 	"github.com/lancekrogers/agent-defi-ethden-2026/internal/base/trading"
+	"github.com/lancekrogers/agent-defi-ethden-2026/internal/guard"
 	"github.com/lancekrogers/agent-defi-ethden-2026/internal/hcs"
 )
 
@@ -46,11 +47,17 @@ type Agent struct {
 	executor trading.TradeExecutor
 	pnl      *trading.PnLTracker
 	handler  *hcs.Handler
+	guard    *guard.CREGuard // optional CRE position constraint enforcement
 
 	daemonReg       *daemon.RegisterResponse
 	startTime       time.Time
 	completedTrades atomic.Int64
 	failedTrades    atomic.Int64
+}
+
+// SetCREGuard configures the optional CRE constraint guard for position enforcement.
+func (a *Agent) SetCREGuard(g *guard.CREGuard) {
+	a.guard = g
 }
 
 // New creates a DeFi Agent with all required dependencies injected.
@@ -271,6 +278,20 @@ func (a *Agent) processTrade(ctx context.Context, signal *trading.Signal, market
 	if signal.SuggestedSize > a.strategy.MaxPosition() {
 		return fmt.Errorf("agent: %w: signal size %.4f > max %.4f",
 			trading.ErrPositionExceedsMax, signal.SuggestedSize, a.strategy.MaxPosition())
+	}
+
+	// Apply CRE constraint if guard is configured.
+	if a.guard != nil {
+		constrained, err := a.guard.EnforceConstraint(ctx, "", signal.SuggestedSize, a.cfg.CREMaxPositionUSD)
+		if err != nil {
+			return fmt.Errorf("agent: CRE guard failed: %w", err)
+		}
+		if constrained < signal.SuggestedSize {
+			a.log.Info("CRE guard clamped position",
+				"original", signal.SuggestedSize,
+				"clamped", constrained)
+			signal.SuggestedSize = constrained
+		}
 	}
 
 	// Calculate slippage-protected MinAmountOut (0.5% tolerance).
