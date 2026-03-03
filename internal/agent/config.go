@@ -3,6 +3,7 @@ package agent
 import (
 	"fmt"
 	"os"
+	"strconv"
 	"time"
 
 	"github.com/lancekrogers/agent-defi-ethden-2026/internal/base/attribution"
@@ -57,6 +58,11 @@ type Config struct {
 	// MarketDataCostWei is the x402 payment amount per market data request in wei.
 	// Defaults to 1000000000000000 (0.001 ETH).
 	MarketDataCostWei string
+
+	// CREMaxPositionUSD is the CRE-approved maximum position size in USD.
+	// When > 0 and a CRE guard is configured, trade positions are clamped to this limit.
+	// Set via CRE_MAX_POSITION_USD environment variable.
+	CREMaxPositionUSD float64
 }
 
 // StrategyConfig builds a MeanReversionConfig from the agent's trading config.
@@ -120,6 +126,11 @@ func LoadConfig() (*Config, error) {
 	// x402 market data payment.
 	cfg.MarketDataRecipient = os.Getenv("DEFI_MARKET_DATA_RECIPIENT")
 	cfg.MarketDataCostWei = envOr("DEFI_MARKET_DATA_COST_WEI", "1000000000000000") // 0.001 ETH
+
+	// CRE Risk Router constraint.
+	if creMax := os.Getenv("CRE_MAX_POSITION_USD"); creMax != "" {
+		cfg.CREMaxPositionUSD, _ = strconv.ParseFloat(creMax, 64)
+	}
 
 	return cfg, nil
 }

@@ -23,6 +23,7 @@ import (
 	"github.com/lancekrogers/agent-defi-ethden-2026/internal/base/identity"
 	"github.com/lancekrogers/agent-defi-ethden-2026/internal/base/payment"
 	"github.com/lancekrogers/agent-defi-ethden-2026/internal/base/trading"
+	"github.com/lancekrogers/agent-defi-ethden-2026/internal/guard"
 	"github.com/lancekrogers/agent-defi-ethden-2026/internal/hcs"
 )
 
@@ -74,6 +75,14 @@ func main() {
 
 	// Wire the agent with all dependencies.
 	a := agent.New(*cfg, log, daemonClient, idRegistry, pay, executor, strategy, pnl, handler)
+
+	creGuard := guard.NewCREGuard(log)
+	a.SetCREGuard(creGuard)
+	if cfg.CREMaxPositionUSD > 0 {
+		log.Info("CRE position guard enabled", "max_position_usd", cfg.CREMaxPositionUSD)
+	} else {
+		log.Info("CRE position guard enabled without global max (per-task constraints only)")
+	}
 
 	log.Info("DeFi agent starting",
 		"agent_id", cfg.AgentID,
