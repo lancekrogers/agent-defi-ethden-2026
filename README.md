@@ -9,7 +9,7 @@
 
 Autonomous DeFi trading agent for Base Sepolia with on-chain identity, machine-to-machine payments, and transaction attribution.
 
-Part of the [ETHDenver 2026 Agent Economy](../README.md) submission.
+Part of the [Obey Agent Economy](https://github.com/lancekrogers/Obey-Agent-Economy) project.
 
 ## Overview
 
