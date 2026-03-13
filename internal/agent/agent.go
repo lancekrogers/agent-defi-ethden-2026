@@ -28,12 +28,12 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/lancekrogers/agent-coordinator-ethden-2026/pkg/daemon"
-	"github.com/lancekrogers/agent-defi-ethden-2026/internal/base/identity"
-	"github.com/lancekrogers/agent-defi-ethden-2026/internal/base/payment"
-	"github.com/lancekrogers/agent-defi-ethden-2026/internal/base/trading"
-	"github.com/lancekrogers/agent-defi-ethden-2026/internal/guard"
-	"github.com/lancekrogers/agent-defi-ethden-2026/internal/hcs"
+	"github.com/lancekrogers/agent-coordinator/pkg/daemon"
+	"github.com/lancekrogers/agent-defi/internal/base/identity"
+	"github.com/lancekrogers/agent-defi/internal/base/payment"
+	"github.com/lancekrogers/agent-defi/internal/base/trading"
+	"github.com/lancekrogers/agent-defi/internal/guard"
+	"github.com/lancekrogers/agent-defi/internal/hcs"
 )
 
 // Agent orchestrates the DeFi agent's full lifecycle.

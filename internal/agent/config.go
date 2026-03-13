@@ -6,11 +6,11 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/lancekrogers/agent-defi-ethden-2026/internal/base/attribution"
-	"github.com/lancekrogers/agent-defi-ethden-2026/internal/base/identity"
-	"github.com/lancekrogers/agent-defi-ethden-2026/internal/base/payment"
-	"github.com/lancekrogers/agent-defi-ethden-2026/internal/base/trading"
-	"github.com/lancekrogers/agent-defi-ethden-2026/internal/hcs"
+	"github.com/lancekrogers/agent-defi/internal/base/attribution"
+	"github.com/lancekrogers/agent-defi/internal/base/identity"
+	"github.com/lancekrogers/agent-defi/internal/base/payment"
+	"github.com/lancekrogers/agent-defi/internal/base/trading"
+	"github.com/lancekrogers/agent-defi/internal/hcs"
 )
 
 // Config holds all configuration for the DeFi agent.

@@ -21,7 +21,7 @@ import (
 
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/lancekrogers/agent-defi-ethden-2026/internal/base/ethutil"
+	"github.com/lancekrogers/agent-defi/internal/base/ethutil"
 )
 
 const (

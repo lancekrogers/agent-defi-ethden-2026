@@ -1,11 +1,11 @@
-module github.com/lancekrogers/agent-defi-ethden-2026
+module github.com/lancekrogers/agent-defi
 
 go 1.24.0
 
 require (
 	github.com/ethereum/go-ethereum v1.17.0
 	github.com/hiero-ledger/hiero-sdk-go/v2 v2.75.0
-	github.com/lancekrogers/agent-coordinator-ethden-2026 v0.0.0-20260221224746-0059b418ef82
+	github.com/lancekrogers/agent-coordinator v0.0.0-20260221224746-0059b418ef82
 )
 
 require (
@@ -53,3 +53,5 @@ require (
 	google.golang.org/grpc v1.79.1 // indirect
 	google.golang.org/protobuf v1.36.11 // indirect
 )
+
+replace github.com/lancekrogers/agent-coordinator => ../agent-coordinator

@@ -13,8 +13,8 @@ import (
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/lancekrogers/agent-defi-ethden-2026/internal/base/attribution"
-	"github.com/lancekrogers/agent-defi-ethden-2026/internal/base/ethutil"
+	"github.com/lancekrogers/agent-defi/internal/base/attribution"
+	"github.com/lancekrogers/agent-defi/internal/base/ethutil"
 )
 
 // TradeExecutor defines the interface for executing trades on a Base DEX.

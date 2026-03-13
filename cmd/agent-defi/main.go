@@ -17,14 +17,14 @@ import (
 
 	hiero "github.com/hiero-ledger/hiero-sdk-go/v2/sdk"
 
-	"github.com/lancekrogers/agent-coordinator-ethden-2026/pkg/daemon"
-	"github.com/lancekrogers/agent-defi-ethden-2026/internal/agent"
-	"github.com/lancekrogers/agent-defi-ethden-2026/internal/base/attribution"
-	"github.com/lancekrogers/agent-defi-ethden-2026/internal/base/identity"
-	"github.com/lancekrogers/agent-defi-ethden-2026/internal/base/payment"
-	"github.com/lancekrogers/agent-defi-ethden-2026/internal/base/trading"
-	"github.com/lancekrogers/agent-defi-ethden-2026/internal/guard"
-	"github.com/lancekrogers/agent-defi-ethden-2026/internal/hcs"
+	"github.com/lancekrogers/agent-coordinator/pkg/daemon"
+	"github.com/lancekrogers/agent-defi/internal/agent"
+	"github.com/lancekrogers/agent-defi/internal/base/attribution"
+	"github.com/lancekrogers/agent-defi/internal/base/identity"
+	"github.com/lancekrogers/agent-defi/internal/base/payment"
+	"github.com/lancekrogers/agent-defi/internal/base/trading"
+	"github.com/lancekrogers/agent-defi/internal/guard"
+	"github.com/lancekrogers/agent-defi/internal/hcs"
 )
 
 func main() {
