@@ -36,9 +36,12 @@ func main() {
 		DEXRouterAddress: envOr("DEX_ROUTER", "0x2626664c2603336E57B271c5C0b26F421741e481"),
 	})
 
-	llmClient := &strategy.ClaudeClient{
-		APIKey: os.Getenv("ANTHROPIC_API_KEY"),
-		Model:  envOr("LLM_MODEL", "claude-sonnet-4-6"),
+	llmClient := &strategy.ObeyClient{
+		Socket:   envOr("OBEY_SOCKET", "/tmp/obey.sock"),
+		Campaign: envOr("OBEY_CAMPAIGN", "Obey-Agent-Economy"),
+		Provider: envOr("OBEY_PROVIDER", "claude-code"),
+		Model:    envOr("LLM_MODEL", "claude-sonnet-4-6"),
+		Festival: envOr("OBEY_FESTIVAL", "OV0001"),
 	}
 
 	strat := strategy.NewLLMStrategy(strategy.LLMConfig{
