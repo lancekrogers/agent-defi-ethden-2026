@@ -62,13 +62,20 @@ type ExecutorConfig struct {
 
 	// SlippageBPS is the maximum allowed slippage in basis points (e.g., 50 = 0.5%).
 	SlippageBPS int
+
+	// UniswapAPIKey is the Uniswap Developer Platform API key.
+	UniswapAPIKey string
+
+	// UniswapAPIBase is the base URL for the Trading API.
+	UniswapAPIBase string
 }
 
 // executor implements TradeExecutor using JSON-RPC calls to Base Sepolia.
 type executor struct {
-	cfg    ExecutorConfig
-	client *http.Client
-	ma     *SMA
+	cfg        ExecutorConfig
+	client     *http.Client
+	ma         *SMA
+	uniswapAPI *UniswapAPIClient
 }
 
 // NewExecutor creates a TradeExecutor for the Base Sepolia DEX.
@@ -85,17 +92,23 @@ func NewExecutor(cfg ExecutorConfig) TradeExecutor {
 	if cfg.SlippageBPS == 0 {
 		cfg.SlippageBPS = 50 // 0.5% default slippage
 	}
-	return &executor{
+	e := &executor{
 		cfg:    cfg,
 		client: &http.Client{Timeout: cfg.HTTPTimeout},
 		ma:     NewSMA(20),
 	}
+
+	// Initialize Uniswap Trading API client if API key is configured.
+	if cfg.UniswapAPIKey != "" {
+		e.uniswapAPI = NewUniswapAPIClient(cfg.UniswapAPIBase, cfg.UniswapAPIKey)
+	}
+
+	return e
 }
 
-// Execute submits a swap transaction to the Base Sepolia DEX router.
-//
-// Calldata is correctly ABI-encoded for Uniswap V3 exactInputSingle. Real signing
-// requires go-ethereum crypto or an external signer; that step is documented below.
+// Execute submits a swap transaction to the DEX router.
+// When UniswapAPIKey is configured, routes through the Uniswap Developer Platform
+// Trading API for optimized routing. Falls back to direct ABI encoding otherwise.
 func (e *executor) Execute(ctx context.Context, trade Trade) (*TradeResult, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, fmt.Errorf("executor: context cancelled before execute: %w", err)
@@ -105,23 +118,106 @@ func (e *executor) Execute(ctx context.Context, trade Trade) (*TradeResult, erro
 		return nil, fmt.Errorf("executor: %w: missing token addresses", ErrInvalidSignal)
 	}
 
+	// Route through Uniswap Trading API if configured.
+	if e.uniswapAPI != nil {
+		return e.executeViaAPI(ctx, trade)
+	}
+
+	return e.executeDirect(ctx, trade)
+}
+
+// executeViaAPI uses the Uniswap Developer Platform Trading API for quoting and
+// transaction construction, then signs and submits via go-ethereum.
+func (e *executor) executeViaAPI(ctx context.Context, trade Trade) (*TradeResult, error) {
+	chainID := fmt.Sprintf("%d", e.cfg.ChainID)
+
+	// Step 1: Get optimized quote from Trading API.
+	quoteResp, err := e.uniswapAPI.GetQuote(ctx, QuoteParams{
+		Type:            "EXACT_INPUT",
+		TokenIn:         trade.TokenIn,
+		TokenOut:        trade.TokenOut,
+		TokenInChainID:  chainID,
+		TokenOutChainID: chainID,
+		Amount:          trade.AmountIn,
+		Swapper:         e.cfg.WalletAddress,
+		Slippage:        float64(e.cfg.SlippageBPS) / 100.0,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("executor: api quote failed: %w", err)
+	}
+
+	// Step 2: Get unsigned swap transaction.
+	swapResp, err := e.uniswapAPI.GetSwap(ctx, quoteResp)
+	if err != nil {
+		return nil, fmt.Errorf("executor: api swap failed: %w", err)
+	}
+
+	// Step 3: Decode the API-provided calldata.
+	calldata, err := hex.DecodeString(strings.TrimPrefix(swapResp.Swap.Data, "0x"))
+	if err != nil {
+		return nil, fmt.Errorf("executor: decode swap calldata: %w", err)
+	}
+
+	// Apply ERC-8021 builder attribution to calldata before signing.
+	if e.cfg.Attribution != nil {
+		attributed, err := e.cfg.Attribution.Encode(ctx, calldata)
+		if err != nil {
+			return nil, fmt.Errorf("executor: attribution encoding failed: %w", err)
+		}
+		calldata = attributed
+	}
+
+	// Step 4: Sign and submit via go-ethereum.
+	if e.cfg.PrivateKey == "" {
+		return nil, fmt.Errorf("executor: %w: private key not configured", ErrTradeFailed)
+	}
+
+	key, err := ethutil.LoadKey(e.cfg.PrivateKey)
+	if err != nil {
+		return nil, fmt.Errorf("executor: load signing key: %w", err)
+	}
+
+	client, err := ethutil.DialClient(ctx, e.cfg.RPCURL)
+	if err != nil {
+		return nil, fmt.Errorf("executor: dial rpc: %w", err)
+	}
+	defer client.Close()
+
+	router := common.HexToAddress(swapResp.Swap.To)
+	txHash, receipt, err := ethutil.SignAndSend(ctx, client, key, e.cfg.ChainID, router, calldata, nil)
+	if err != nil {
+		return nil, fmt.Errorf("executor: swap tx failed: %w", ErrTradeFailed)
+	}
+
+	gasUsed := new(big.Int).SetUint64(receipt.GasUsed)
+	effectivePrice := receipt.EffectiveGasPrice
+	if effectivePrice == nil {
+		effectivePrice = big.NewInt(0)
+	}
+	gasCostWei := new(big.Int).Mul(gasUsed, effectivePrice)
+
+	result := &TradeResult{
+		Trade:      trade,
+		TxHash:     txHash.Hex(),
+		AmountIn:   trade.AmountIn,
+		AmountOut:  trade.MinAmountOut,
+		ExecutedAt: time.Now(),
+		Profitable: trade.Signal.Type == SignalBuy,
+		GasUsed:    receipt.GasUsed,
+		GasCostWei: fmt.Sprintf("0x%x", gasCostWei),
+	}
+
+	return result, nil
+}
+
+// executeDirect uses hand-encoded ABI calldata for Uniswap V3 exactInputSingle.
+// This is the fallback when no API key is configured.
+func (e *executor) executeDirect(ctx context.Context, trade Trade) (*TradeResult, error) {
 	// Verify chain is reachable before submitting.
 	if _, err := e.callRPC(ctx, "eth_blockNumber", []interface{}{}); err != nil {
 		return nil, fmt.Errorf("executor: chain unreachable: %w", ErrTradeFailed)
 	}
 
-	// Build Uniswap V3 exactInputSingle calldata.
-	// Function selector: keccak256("exactInputSingle((address,address,uint24,address,uint256,uint256,uint160))")[:4]
-	// = 0x414bf389
-	//
-	// ABI encoding for the ExactInputSingleParams tuple (all fields padded to 32 bytes):
-	//   tokenIn        address  (12 zero bytes + 20 addr bytes)
-	//   tokenOut       address  (12 zero bytes + 20 addr bytes)
-	//   fee            uint24   (left-padded uint, hardcoded 3000 = 0x0BB8 for 0.3% tier)
-	//   recipient      address  (12 zero bytes + 20 addr bytes)
-	//   amountIn       uint256  (left-padded from trade.AmountIn hex)
-	//   amountOutMin   uint256  (left-padded from trade.MinAmountOut hex)
-	//   sqrtPriceLimit uint160  (zero = no price limit)
 	fee := make([]byte, 32)
 	fee[29], fee[30], fee[31] = 0x00, 0x0B, 0xB8 // 3000 in big-endian
 
@@ -135,7 +231,6 @@ func (e *executor) Execute(ctx context.Context, trade Trade) (*TradeResult, erro
 	calldata = append(calldata, abiEncodeUint256(trade.MinAmountOut)...)
 	calldata = append(calldata, make([]byte, 32)...) // sqrtPriceLimitX96 = 0
 
-	// Apply ERC-8021 builder attribution to calldata before signing.
 	if e.cfg.Attribution != nil {
 		attributed, err := e.cfg.Attribution.Encode(ctx, calldata)
 		if err != nil {
@@ -144,7 +239,6 @@ func (e *executor) Execute(ctx context.Context, trade Trade) (*TradeResult, erro
 		calldata = attributed
 	}
 
-	// Sign and submit the swap transaction via go-ethereum.
 	if e.cfg.PrivateKey == "" {
 		return nil, fmt.Errorf("executor: %w: private key not configured", ErrTradeFailed)
 	}
@@ -166,7 +260,6 @@ func (e *executor) Execute(ctx context.Context, trade Trade) (*TradeResult, erro
 		return nil, fmt.Errorf("executor: swap tx failed: %w", ErrTradeFailed)
 	}
 
-	// Compute actual gas cost: GasUsed * EffectiveGasPrice.
 	gasUsed := new(big.Int).SetUint64(receipt.GasUsed)
 	effectivePrice := receipt.EffectiveGasPrice
 	if effectivePrice == nil {
