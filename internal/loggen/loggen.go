@@ -64,17 +64,17 @@ type VerifyDetail struct {
 
 // RitualLogEntry is the single JSON object written by each ritual run.
 type RitualLogEntry struct {
-	Action       string         `json:"action"`
-	Timestamp    string         `json:"timestamp"`
-	Phase        string         `json:"phase"`
-	FestivalID   string         `json:"festival_id"`
-	RunID        string         `json:"run_id"`
-	Decision     string         `json:"decision"`
-	Reasoning    map[string]any `json:"reasoning"`
-	ToolsUsed    []string       `json:"tools_used"`
-	Retries      int            `json:"retries"`
-	DurationMS   int64          `json:"duration_ms"`
-	Errors       []string       `json:"errors"`
+	Action        string         `json:"action"`
+	Timestamp     string         `json:"timestamp"`
+	Phase         string         `json:"phase"`
+	FestivalID    string         `json:"festival_id"`
+	RunID         string         `json:"run_id"`
+	Decision      string         `json:"decision"`
+	Reasoning     map[string]any `json:"reasoning"`
+	ToolsUsed     []string       `json:"tools_used"`
+	Retries       int            `json:"retries"`
+	DurationMS    int64          `json:"duration_ms"`
+	Errors        []string       `json:"errors"`
 	ArtifactPaths map[string]any `json:"artifact_paths,omitempty"`
 }
 
@@ -90,7 +90,7 @@ type Config struct {
 
 // Refresher rebuilds agent_log.json from ritual outputs and on-chain events.
 type Refresher struct {
-	Config Config
+	Config  Config
 	OutFile string
 }
 
