@@ -7,17 +7,28 @@
 [![ERC-8004](https://img.shields.io/badge/ERC--8004-Identity-3C3C3D?logo=ethereum)](https://eips.ethereum.org)
 [![ERC-8021](https://img.shields.io/badge/ERC--8021-Attribution-3C3C3D?logo=ethereum)](https://eips.ethereum.org)
 
-Autonomous DeFi trading agent for Base Sepolia with on-chain identity, machine-to-machine payments, and transaction attribution.
+DeFi trading agents for Base Sepolia with on-chain identity, machine-to-machine payments, and transaction attribution.
 
 Part of the [Obey Agent Economy](https://github.com/lancekrogers/Obey-Agent-Economy) project.
 
+## Agents
+
+This repo contains two trading agents and two supporting tools:
+
+| Command | Description |
+|---------|-------------|
+| `cmd/agent-defi` | Coordinator-driven DeFi agent. Receives tasks from HCS, executes trades, reports P&L back to the coordinator. |
+| `cmd/vault-agent` | **OBEY Vault Agent**. Standalone ritual-driven trading loop: runs festival rituals for market research, evaluates CRE risk gates, executes vault swaps, and regenerates agent_log.json. |
+| `cmd/observer` | Read-only vault status tool. Prints vault state (total assets, shares, boundaries) without signing anything. |
+| `cmd/loggen` | Generates `agent_log.json` in Protocol Labs DevSpot format from on-chain SwapExecuted events and festival ritual artifacts. |
+
+Both agents operate on Base Sepolia (chain ID 84532), register on-chain identity via ERC-8004, and execute trades through the ObeyVault (ERC-4626) against Uniswap V3.
+
 ## Overview
 
-A trading agent that operates on Base Sepolia (chain ID 84532). It registers an on-chain identity via ERC-8004, pays for external services autonomously via the x402 payment protocol, executes mean reversion trades on Uniswap V3, and attributes all transactions with ERC-8021 builder codes. P&L reports and health status are published to the coordinator via Hedera Consensus Service (HCS).
+The **agent-defi** agent is coordinator-driven: it receives task assignments from HCS, executes mean reversion trades on Uniswap V3, pays for external services via x402, attributes transactions with ERC-8021 builder codes, and reports P&L back to the coordinator via HCS.
 
-The agent is designed for self-funded operation: trading logic, x402 payment handling, and P&L accounting are implemented in code, while additional live trading evidence is still being collected.
-
-> **TL;DR** — Autonomous trading agent on Base Sepolia: registers on-chain identity (ERC-8004), executes mean reversion trades on Uniswap V3, pays for services via x402, attributes transactions with ERC-8021 builder codes, and reports P&L to the coordinator via Hedera HCS. Includes implemented testnet economics and cost tracking.
+The **vault-agent** (OBEY Vault Agent) is standalone: it runs festival methodology rituals for market research, evaluates GO/NO_GO decisions through 8 CRE risk gates, and executes vault swaps when approved. It produces real `agent_log.json` entries with confidence scores, gate results, and on-chain execution evidence.
 
 ## Built with Obedience Corp
 
@@ -133,21 +144,20 @@ The trading strategy operates on a simple principle: prices tend to revert to th
 
 Signal confidence scales linearly with deviation magnitude (0.5 at threshold, 1.0 at 2x threshold). Position size scales proportionally with confidence.
 
-## P&L Summary
+## P&L Model (testnet only)
 
-The agent's economic model estimates **~$12-16 net profit per trade** at the 2% mean reversion threshold with a $1000 position:
+The agent tracks a theoretical economic model. These numbers have **not been validated on mainnet** and assume ideal execution conditions. Testnet pools have different liquidity and pricing from production.
 
-| Component | Amount |
-|-----------|--------|
-| Revenue (2% deviation) | $20.00 |
+| Component | Theoretical Amount |
+|-----------|-------------------|
+| Revenue (2% deviation on $1000) | $20.00 |
 | Uniswap fee (0.3%) | -$3.00 |
-| Gas (Base L2) | -$0.01 |
-| Slippage (est.) | -$1-5 |
-| **Net per trade** | **~$12-16** |
+| Gas (Base L2) | ~$0.01 |
+| Slippage (unknown at scale) | variable |
 
-Base L2 gas costs are negligible (~$0.01 per `exactInputSingle` call), which makes the model plausible even at conservative trading thresholds. The `IsSelfSustaining` flag in every HCS P&L report is computed as `NetPnL > 0`, but additional live trade evidence is still worth collecting before treating the estimate as proven.
+The `IsSelfSustaining` flag in HCS P&L reports is computed as `NetPnL > 0`. Base L2 gas is cheap, but real-world slippage, MEV, and liquidity depth on mainnet are unknowns until live trading data exists.
 
-For full economic analysis, break-even math, and verification steps, see [docs/pnl-proof.md](docs/pnl-proof.md).
+For the full theoretical model and cost breakdown, see [docs/pnl-proof.md](docs/pnl-proof.md).
 
 ## Quick Start
 
@@ -208,7 +218,10 @@ just run
 ```
 agent-defi/
 ├── cmd/
-│   └── agent-defi/            # Entry point, dependency wiring
+│   ├── agent-defi/            # Coordinator-driven DeFi agent
+│   ├── vault-agent/           # OBEY Vault Agent (standalone ritual-driven loop)
+│   ├── observer/              # Read-only vault status tool
+│   └── loggen/                # DevSpot agent_log.json generator
 ├── internal/
 │   ├── agent/                 # Agent lifecycle, config, goroutine orchestration
 │   ├── base/
@@ -216,8 +229,14 @@ agent-defi/
 │   │   ├── identity/          # ERC-8004 on-chain identity registration
 │   │   ├── payment/           # x402 machine-to-machine payment protocol
 │   │   └── trading/           # Mean reversion strategy, trade executor, P&L tracker
+│   ├── festruntime/           # Festival methodology ritual execution
 │   ├── guard/                 # CRE Risk Router constraint enforcement (position clamping)
-│   └── hcs/                   # HCS publish/subscribe transport (Hiero SDK)
+│   ├── hcs/                   # HCS publish/subscribe transport (Hiero SDK)
+│   ├── loggen/                # On-chain event + ritual artifact aggregation
+│   ├── loop/                  # Vault trading loop (discover/plan/execute/verify)
+│   ├── risk/                  # CRE risk evaluation client
+│   ├── strategy/              # Mean reversion signal generation
+│   └── vault/                 # ObeyVault (ERC-4626) client bindings
 ```
 
 ## Development
